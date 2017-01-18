@@ -10,6 +10,11 @@ from supybot.commands import *
 import supybot.plugins as plugins
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
+
+import http.client, urllib.parse
+import time
+import json
+
 try:
     from supybot.i18n import PluginInternationalization
     _ = PluginInternationalization('Phabricator')
@@ -26,5 +31,36 @@ class Phabricator(callbacks.Plugin):
 
 Class = Phabricator
 
+phabricatorURL = "code.wildfiregames.com"
+token = "<insertyourtokenhere>"
 
-# vim:set shiftwidth=4 softtabstop=4 expandtab textwidth=79:
+def queryFeed(params):
+    queryAPI("/api/feed.query", params)
+
+def queryAPI(path, params):
+
+    headers = {
+    }
+
+    conn = http.client.HTTPSConnection(phabricatorURL)
+    conn.request("POST", path, urllib.parse.urlencode(params), headers)
+    response = conn.getresponse()
+
+    if (response.status != 200):
+        print(response.status, response.reason)
+        conn.close()
+        return
+
+    data = response.read()
+    conn.close()
+
+    results = json.loads(data.decode("utf-8")).get("result")
+
+    for result in results:
+        print(result)
+
+queryFeed({
+    'before': time.time() - 24 * 60 * 60,
+    "api.token": token,
+    'limit': 2
+});
