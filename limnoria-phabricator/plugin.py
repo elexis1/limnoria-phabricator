@@ -8,13 +8,15 @@
 import supybot.utils as utils
 from supybot.commands import *
 import supybot.plugins as plugins
+import supybot.ircmsgs as ircmsgs
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
-
 import http.client, urllib.parse
+
 import time, datetime
 import json
-from calendar import EPOCH
+import re
+from collections import OrderedDict
 
 try:
     from supybot.i18n import PluginInternationalization
@@ -24,11 +26,20 @@ except ImportError:
     # without the i18n module
     _ = lambda x: x
 
-
 class Phabricator(callbacks.Plugin):
     """GPL 3.0"""
     threaded = True
 
+    def __init__(self, irc):
+        self.__parent = super(Phabricator, self)
+        self.__parent.__init__(irc)
+
+        callbacks.Plugin.__init__(self, irc)
+
+    # Read public messages (contrary to the function name)
+    def doPrivmsg(self, irc, msg):
+        if not callbacks.addressed(irc.nick, msg):
+            printDifferential(irc, msg.args[0], msg.args[1])
 
 Class = Phabricator
 
@@ -108,6 +119,12 @@ def queryObjects(objectPHIDs):
         objects[objectPHID] = objType, objID, objTitle, objLink
 
     return objects
+
+def queryDifferential(IDs):
+
+    return queryAPI("/api/differential.query", {
+        "ids[]": IDs
+    })
 
 def queryFeed(chronokey, limit):
 
@@ -222,3 +239,16 @@ def pollNewStories(chronokey):
 # Only display stories that occured after this nonunix timestamp
 chronokey = 6376865859769256111
 pollNewStories(chronokey)
+
+def printDifferential(irc, channel, txt):
+
+    matches = re.findall(r"\b(D\d*)\b", txt)
+    revisions = list(map(lambda d : d[1:], matches))
+    revisions = OrderedDict.fromkeys(revisions, True)
+    # TODO: keep order
+    if len(revisions) == 0:
+        return
+
+    results = queryDifferential(revisions)
+    for result in results:
+        irc.sendMsg(ircmsgs.privmsg(channel, "D" + result["id"] + ": " + result["title"] + " [" + result["statusName"] + "] – <" + result["uri"] + ">"))
