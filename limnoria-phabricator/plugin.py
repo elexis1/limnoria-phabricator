@@ -100,7 +100,6 @@ def queryAuthorNames(authorPHIDs):
 
 def queryObjects(objectPHIDs):
 
-    # Retrieve differential title
     results = queryPHIDs(objectPHIDs)
 
     if results is None:
@@ -109,14 +108,14 @@ def queryObjects(objectPHIDs):
     objects = {}
 
     for objectPHID in results:
+
         obj = results[objectPHID]
 
-        objID = obj["name"]
-        objLink = obj["uri"]
-        objType = obj["type"]
-        objTitle = obj["fullName"][len(objID + ": "):]
-
-        objects[objectPHID] = objType, objID, objTitle, objLink
+        objects[objectPHID] = \
+            obj["type"], \
+            obj["name"], \
+            obj["fullName"][len(obj["name"] + ": "):], \
+            obj["uri"]
 
     return objects
 
