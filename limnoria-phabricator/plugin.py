@@ -295,6 +295,40 @@ class PhabricatorPrinter:
                     "<" + objLink + ">.")
                 continue
 
+            if objType == "Project":
+                addedMemberAction = "added a member for"
+                if (action.startswith(addedMemberAction)):
+                    addedMember = action[len(addedMemberAction + " " + objTitle + ": "):-len(".")]
+                    strings.append(self.newsPrefix + \
+                        self.obscureAuthorName(authorName) + " " + \
+                        "added " + \
+                        self.obscureAuthorName(addedMember) + " " + \
+                        "as a member to " + \
+                        self.bold(irc, objTitle) + " " \
+                        "<" + objLink + ">.")
+                    continue
+
+                addedMembersAction = "added members for"
+                if (action.startswith(addedMembersAction)):
+                    addedMembers = action[len(addedMembersAction + " " + objTitle + ": "):-len(".")].split(", ")
+                    strings.append(self.newsPrefix + \
+                        self.obscureAuthorName(authorName) + " " + \
+                        "added " + \
+                        ", ".join(map(lambda member: self.obscureAuthorName(member), addedMembers)) + " " + \
+                        "as members to " + \
+                        self.bold(irc, objTitle) + " " \
+                        "<" + objLink + ">.")
+                    continue
+
+                editPolicyAction = "changed the edit policy for"
+                if (action.startswith(editPolicyAction)):
+                    strings.append(self.newsPrefix + \
+                        self.obscureAuthorName(authorName) + " " + \
+                        editPolicyAction + " " + \
+                        self.bold(irc, objTitle) + " " \
+                        "<" + objLink + ">.")
+                    continue
+
             print("Unexpected object type '" + objType + "'", objectPHID)
 
         return chronokey, strings
@@ -403,10 +437,14 @@ class conduitAPI:
 
             obj = results[objectPHID]
 
-            fullName = obj["fullName"][len(obj["name"] + " "):]
+            fullName = obj["fullName"]
 
-            if obj["typeName"] == "Differential Revision" or obj["typeName"] == "Diffusion Commit":
-                fullName = fullName[len(":"):]
+            # Clumsy object name parsing
+            if obj["typeName"] != "Project":
+                fullName = fullName[len(obj["name"] + " "):]
+
+                if obj["typeName"] == "Differential Revision" or obj["typeName"] == "Diffusion Commit":
+                    fullName = fullName[len(":"):]
 
             objects[objectPHID] = \
                 obj["typeName"], \

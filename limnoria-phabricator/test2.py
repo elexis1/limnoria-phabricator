@@ -20,6 +20,7 @@ printer = PhabricatorPrinter(
 # 6375936561434323755 tests the creation of a paste
 # 6370700463163291127 tests a commit without phabricator account (fallback query)
 # 6376677818298665473 tests adding of reviewers
+# 6377974521422163168 tests project changes
 
 #print(printer.obscureAuthorName("foo"))
 #printer.printRevisions(None, None, "rP12345")
