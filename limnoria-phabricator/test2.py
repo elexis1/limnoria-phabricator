@@ -14,11 +14,12 @@ printer = PhabricatorPrinter(
     chronokey = 6375936561434323755,
 )
 
+# some chronokeys (all n-1):
 # 6377663121088159957 tests acceptance of a commit
 # 6370393125263759849 tests raising of a concern of a commit
 # 6375936561434323755 tests the creation of a paste
 # 6370700463163291127 tests a commit without phabricator account (fallback query)
-# 6376677818298665473 tests adding of reviewers (unsupported)
+# 6376677818298665473 tests adding of reviewers
 
 #print(printer.obscureAuthorName("foo"))
 #printer.printRevisions(None, None, "rP12345")

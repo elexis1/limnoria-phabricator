@@ -247,8 +247,17 @@ class PhabricatorPrinter:
             if objType == "Differential Revision":
 
                 # contrary to other actions, this one extends the string by the added reviewer
-                if action.startswith("added a reviewer"):
-                    print("Skipping unsupported adding of reviewers [" + objID + "]")
+                addedReviewerAction = "added a reviewer for"
+                addedReviewer = action[len(addedReviewerAction + " " + objID + ": " + objTitle + ": "):-len(".")]
+                if action.startswith(addedReviewerAction):
+                    strings.append(self.newsPrefix + \
+                        self.obscureAuthorName(authorName) + " " + \
+                        "added " + \
+                        self.obscureAuthorName(addedReviewer) + " " + \
+                        "as a reviewer for " + \
+                        self.bold(irc, objID) + " (" + objTitle + ") " + \
+                        "<" + objLink + ">.")
+                    continue
 
                 action = action[:-len(" " + objID + ": " + objTitle + ".")]
 
