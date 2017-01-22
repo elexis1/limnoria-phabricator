@@ -254,7 +254,7 @@ class PhabricatorPrinter:
                     print("Skipping unsupported adding of reviewers [" + objID + "]")
                     continue
 
-                strings.append(self.newsPrefix + " " + \
+                strings.append(self.newsPrefix + \
                     self.obscureAuthorName(authorName) + " " + \
                     action + " " + \
                     self.bold(irc, objID) + " (" + objTitle + ") " + \
@@ -266,7 +266,7 @@ class PhabricatorPrinter:
                     print("Skipping commit", objID, objTitle)
                     continue
 
-                strings.append(self.newsPrefix + " " + \
+                strings.append(self.newsPrefix + \
                     self.obscureAuthorName(authorName) + " " + \
                     action + " " + \
                     self.bold(irc, objID) + " (" + objTitle + ") " + \
@@ -274,7 +274,7 @@ class PhabricatorPrinter:
                 continue
 
             if objType == "Paste":
-                strings.append(self.newsPrefix + " " + \
+                strings.append(self.newsPrefix + \
                     self.obscureAuthorName(authorName) + " " + \
                     action + " " + \
                     self.bold(irc, objID) + " (" + objTitle + ") " + \
