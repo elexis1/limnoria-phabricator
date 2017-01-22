@@ -241,17 +241,19 @@ class PhabricatorPrinter:
                 print("Fallback: Commit without phabricator account: [" + text + "]")
                 authorName = self.conduitAPI.queryCommitsByID(objID[len("rP"):]).get("data")[objectPHID]["author"]
 
-            # clumsy parsing of the action, since transactionPHIDs can't be queried yet
-            action = text[len(authorName + " "):-len(" " + objID + self.titleSeparator(objType) + objTitle + ".")]
+            # Clumsy parsing of the "text" property of the feed.query api results, since transactionPHIDs can't be queried yet
+            action = text[len(authorName + " "):]
 
             if objType == "Differential Revision":
-                if action == "retitled" and not self.notifyRetitle:
-                    print("Skipping retitle of", objID)
-                    continue
 
                 # contrary to other actions, this one extends the string by the added reviewer
                 if action.startswith("added a reviewer"):
                     print("Skipping unsupported adding of reviewers [" + objID + "]")
+
+                action = action[:-len(" " + objID + ": " + objTitle + ".")]
+
+                if action == "retitled" and not self.notifyRetitle:
+                    print("Skipping retitle of", objID)
                     continue
 
                 strings.append(self.newsPrefix + \
@@ -262,6 +264,7 @@ class PhabricatorPrinter:
                 continue
 
             if objType == "Diffusion Commit":
+                action = action[:-len(" " + objID + ": " + objTitle + ".")]
                 if action == "committed" and not self.notifyCommit:
                     print("Skipping commit", objID, objTitle)
                     continue
@@ -274,6 +277,8 @@ class PhabricatorPrinter:
                 continue
 
             if objType == "Paste":
+                # Notice the missing colon between ID and Title
+                action = action[:-len(" " + objID + " " + objTitle + ".")]
                 strings.append(self.newsPrefix + \
                     self.obscureAuthorName(authorName) + " " + \
                     action + " " + \
@@ -284,11 +289,6 @@ class PhabricatorPrinter:
             print("Unexpected object type '" + objType + "'", objectPHID)
 
         return chronokey, strings
-
-    def titleSeparator(self, objType):
-        if objType == "Paste":
-            return " "
-        return ": "
 
     # Remember the chronological entry of the most recently
     # processed or printed update on phabricator
