@@ -35,6 +35,9 @@ class Phabricator(callbacks.Plugin):
         self.__parent.__init__(irc)
         callbacks.Plugin.__init__(self, irc)
 
+        self.syncedChannels = []
+        self.thread = None
+
         self.printer = PhabricatorPrinter(
             self.registryValue("phabricatorURL"),
             self.registryValue("phabricatorToken"),
@@ -46,15 +49,32 @@ class Phabricator(callbacks.Plugin):
             self.registryValue("notifyRetitle"),
             self.registryValue("chronokeyFile"))
 
-        # Notify about recent phabricator stories
-        thread = threading.Thread(target=self.printer.pollNewStories, args=(irc,), daemon=True)
-        thread.start()
-
     # Respond to channel and private messages
     def doPrivmsg(self, irc, msg):
         self.printer.printDifferentials(irc, msg.args[0], msg.args[1])
         self.printer.printRevisions(irc, msg.args[0], msg.args[1])
         self.printer.printPastes(irc, msg.args[0], msg.args[1])
+
+    def do315(self, irc, msg):
+
+        self.syncedChannels.append(msg.args[1])
+
+        # Don't send messages before all channels were synced
+        for (channel, c) in irc.state.channels.items():
+            if channel not in self.syncedChannels:
+                return
+
+        # Notify about recent phabricator stories
+        if (self.thread):
+            return
+
+        self.thread = threading.Thread(target=self.printer.pollNewStories, args=(irc,), daemon=True)
+        self.thread.start()
+
+    def doPart(self, irc, msg):
+        for channel in msg.args[0].split(','):
+            if channel in self.syncedChannels:
+                self.syncedChannels.remove(msg.args[1])
 
 # Constructs human-readable strings and optionally posts them to IRC.
 # Allows testing of the querying and printing without actually connecting to IRC.
