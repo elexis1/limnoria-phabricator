@@ -96,6 +96,9 @@ class PhabricatorPrinter:
 
         results = self.conduitAPI.queryDifferentials(revisions)
 
+        if results is None:
+            return
+
         for result in results:
             strng = self.bold(irc, "D" + result["id"]) + ": " + \
                 result["title"] + " [" + result["statusName"] + "] – " + \
