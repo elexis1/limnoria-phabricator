@@ -47,6 +47,10 @@ def configure(advanced):
     Phabricator.notifyCommit.setValue(
         yn("Notify if a developer committed a patch?", default=True))
 
+    Phabricator.obscureUsername.setValue(
+        yn("Prevent the bot from pinging irc users in updates by inserting invisible whitespace in the username?", default=True))
+
+
 # Register valid options
 
 Phabricator = conf.registerPlugin('Phabricator')
@@ -78,3 +82,5 @@ conf.registerGlobalValue(Phabricator, 'notifyCommit',
 conf.registerGlobalValue(Phabricator, 'notifyRetitle',
     registry.Boolean(True, _("Whether to post a notification if a differential was renamed")))
 
+conf.registerGlobalValue(Phabricator, 'obscureUsername',
+    registry.Boolean(True, _("Inserts invisible whitespace in the username, so that the bot doesn't ping irc users if they update something")))

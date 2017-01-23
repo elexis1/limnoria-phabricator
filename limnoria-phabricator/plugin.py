@@ -46,6 +46,7 @@ class Phabricator(callbacks.Plugin):
             self.registryValue("sleepTime"),
             self.registryValue("newsPrefix"),
             self.registryValue("ignoredUsers"),
+            self.registryValue("obscureUsername"),
             self.registryValue("notifyCommit"),
             self.registryValue("notifyRetitle"),
             self.registryValue("chronokeyFile"))
@@ -85,13 +86,14 @@ class Phabricator(callbacks.Plugin):
 class PhabricatorPrinter:
 
     def __init__(self, phabricatorURL, token, storyLimit, sleepTime, newsPrefix,
-                 ignoredUsers, notifyCommit, notifyRetitle, chronokeyFile=None, chronokey=None):
+                 ignoredUsers, obscureUsernames, notifyCommit, notifyRetitle, chronokeyFile=None, chronokey=None):
 
         self.conduitAPI = conduitAPI(phabricatorURL, token)
         self.storyLimit = storyLimit
         self.sleepTime = sleepTime
         self.newsPrefix = newsPrefix
         self.ignoredUsers = ignoredUsers
+        self.obscureUsernames = obscureUsernames
         self.notifyCommit = notifyCommit
         self.notifyRetitle = notifyRetitle
         self.chronokeyFile = chronokeyFile
@@ -105,7 +107,11 @@ class PhabricatorPrinter:
     # Adds invisible whitespace between characters to
     # avoid people pinging themselves with updates
     def obscureAuthorName(self, authorName):
-        return u"\u200B".join(list(authorName))
+
+        if self.obscureUsernames:
+            return u"\u200B".join(list(authorName))
+
+        return authorName
 
     # Display the title and URL of all differential IDs appearing in the text (D123)
     # Don't obscure the nickname, so that developers are pinged
