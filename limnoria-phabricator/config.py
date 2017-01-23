@@ -45,7 +45,7 @@ def configure(advanced):
         yn("Notify if differentials are retitled?", default=True))
 
     Phabricator.notifyCommit.setValue(
-        yn("Notify if a developer committed a path?", default=True))
+        yn("Notify if a developer committed a patch?", default=True))
 
 # Register valid options
 
@@ -78,5 +78,3 @@ conf.registerGlobalValue(Phabricator, 'notifyCommit',
 conf.registerGlobalValue(Phabricator, 'notifyRetitle',
     registry.Boolean(True, _("Whether to post a notification if a differential was renamed")))
 
-conf.registerGlobalValue(Phabricator, 'notifyRetitle',
-    registry.Boolean(True, _("Whether to post a notification if a differential was renamed")))
