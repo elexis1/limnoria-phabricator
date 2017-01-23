@@ -5,6 +5,7 @@
 
 import supybot.utils as utils
 from supybot.commands import *
+import supybot.conf as conf
 import supybot.plugins as plugins
 import supybot.ircmsgs as ircmsgs
 import supybot.ircutils as ircutils
@@ -72,9 +73,12 @@ class Phabricator(callbacks.Plugin):
         self.thread.start()
 
     def doPart(self, irc, msg):
+        if msg.nick != conf.supybot.nick:
+            return
+
         for channel in msg.args[0].split(','):
             if channel in self.syncedChannels:
-                self.syncedChannels.remove(msg.args[1])
+                self.syncedChannels.remove(channel)
 
 # Constructs human-readable strings and optionally posts them to IRC.
 # Allows testing of the querying and printing without actually connecting to IRC.
@@ -505,7 +509,7 @@ class conduitAPI:
         })
 
         if results is None:
-            return []
+            return [], [], []
 
         stories = []
         authorPHIDs = []
