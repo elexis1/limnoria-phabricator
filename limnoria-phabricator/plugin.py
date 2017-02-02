@@ -49,7 +49,8 @@ class Phabricator(callbacks.Plugin):
             self.registryValue("obscureUsername"),
             self.registryValue("notifyCommit"),
             self.registryValue("notifyRetitle"),
-            self.registryValue("chronokeyFile"))
+            self.registryValue("chronokeyFile"),
+        )
 
     # Respond to channel and private messages
     def doPrivmsg(self, irc, msg):

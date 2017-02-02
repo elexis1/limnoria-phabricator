@@ -3,15 +3,16 @@ from plugin import PhabricatorPrinter
 # Allows testing the querying and string construction without connecting to IRC
 
 printer = PhabricatorPrinter(
-    phabricatorURL="code.wildfiregames.com",
-    token="your-token-here",
-    storyLimit = 100,
-    sleepTime = 5,
+    phabricatorURL = "code.wildfiregames.com",
+    token = "your-token-here",
+    storyLimit = 4,
+    sleepTime = 30,
     newsPrefix = "News from 0 A.D.: ",
     ignoredUsers = ["Harbormaster", "Vulcan"],
-    notifyCommit=True,
-    notifyRetitle=True,
-    chronokey = 6375936561434323755,
+    notifyCommit = True,
+    notifyRetitle = True,
+    chronokey = 6378414858781907269,
+    chronokeyFile = None,
 )
 
 # some chronokeys (all n-1):
