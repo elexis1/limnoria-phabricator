@@ -424,7 +424,8 @@ class conduitAPI:
         data = json.loads(data.decode("utf-8"))
 
         if data["error_code"] is not None:
-            print(data["error_info"])
+            print("Error:", data["error_info"])
+            print("Query:", path, params)
             return None
 
         return data.get("result")
