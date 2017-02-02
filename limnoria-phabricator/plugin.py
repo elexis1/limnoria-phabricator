@@ -222,7 +222,7 @@ class PhabricatorPrinter:
         while True:
             try:
                 print("Pulling Stories")
-                chronokey, strings = self.queryFeedExtended(irc, chronokey, self.storyLimit)
+                chronokey, strings = self.queryFeedExtended(irc, chronokey)
 
                 for strng in strings:
                     print(strng)
@@ -239,9 +239,9 @@ class PhabricatorPrinter:
     # Pulls some stories on phabricator that are more recent than the chronokey.
     # Fetches the refered authors and differentials.
     # Returns an array of human-readable strings to be posted in irc and the updated chronokey.
-    def queryFeedExtended(self, irc, chronokey, limit):
+    def queryFeedExtended(self, irc, chronokey):
 
-        stories, objectPHIDs, authorPHIDs = self.conduitAPI.queryFeed(chronokey, limit)
+        stories, objectPHIDs, authorPHIDs = self.conduitAPI.queryFeed(chronokey, self.storyLimit)
         authorNames = self.conduitAPI.queryAuthorNames(authorPHIDs)
         objects = self.conduitAPI.queryObjects(objectPHIDs)
 
@@ -251,6 +251,7 @@ class PhabricatorPrinter:
 
         # Sort by timestamp
         storiesSorted = sorted(stories, key=lambda story: story[1])
+
         strings = []
         for story in storiesSorted:
 
