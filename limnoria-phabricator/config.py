@@ -39,7 +39,7 @@ def configure(advanced):
         something("Filename to store the most recently processed chronological key", default="chronokey.txt"))
 
     Phabricator.ignoredUsers.setValue(
-        anything("Specify the token to access the Phabricator conduit API.", default="Harbormaster Vulcan", acceptEmpty=True))
+        anything("Updates of these usernames will remain hidden.", default="Harbormaster Vulcan", acceptEmpty=True))
 
     Phabricator.notifyRetitle.setValue(
         yn("Notify if differentials are retitled?", default=True))
@@ -49,7 +49,6 @@ def configure(advanced):
 
     Phabricator.obscureUsername.setValue(
         yn("Prevent the bot from pinging irc users in updates by inserting invisible whitespace in the username?", default=True))
-
 
 # Register valid options
 
