@@ -254,13 +254,13 @@ class PhabricatorPrinter:
         strings = []
         for story in storiesSorted:
 
-            storyPHID, cronkey, epoch, authorPHID, objectPHID, text = story
+            storyPHID, newChronokey, epoch, authorPHID, objectPHID, text = story
             objType, objID, objTitle, objLink = objects[objectPHID]
             authorName = authorNames[authorPHID]
 
             # Go forward in history. Use min to go backwards.
             previous = chronokey
-            chronokey = max(chronokey, cronkey)
+            chronokey = max(chronokey, newChronokey)
             if self.chronokeyFile and previous != chronokey:
                 self.saveChronokey(chronokey)
 
@@ -526,11 +526,11 @@ class conduitAPI:
 
         for storyPHID in results:
             epoch = int(results[storyPHID]["epoch"])
-            cronkey = int(results[storyPHID]["chronologicalKey"])
+            newChronokey = int(results[storyPHID]["chronologicalKey"])
 
             # If we don't recall the last
             if chronokey == 0 and epoch < datetime.utcnow():
-                print("Ignoring outdated story from", cronkey)
+                print("Ignoring outdated story from", newChronokey)
                 continue
 
             authorPHID = results[storyPHID]["authorPHID"]
@@ -548,7 +548,7 @@ class conduitAPI:
             # transactionPHIDs = list(results[storyPHID]["data"]["transactionPHIDs"].keys())
             # allTransactionPHIDs += transactionPHIDs
 
-            stories.append((storyPHID, cronkey, epoch, authorPHID, objectPHID, text))
+            stories.append((storyPHID, newChronokey, epoch, authorPHID, objectPHID, text))
 
         return stories, objectPHIDs, authorPHIDs #, allTransactionPHIDs
 
