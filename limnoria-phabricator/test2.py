@@ -9,6 +9,7 @@ printer = PhabricatorPrinter(
     sleepTime = 30,
     newsPrefix = "News from 0 A.D.: ",
     ignoredUsers = ["Harbormaster", "Vulcan"],
+    obscureUsernames = False,
     notifyCommit = True,
     notifyRetitle = True,
     chronokey = 6378414858781907269,
