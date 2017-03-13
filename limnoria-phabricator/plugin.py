@@ -792,7 +792,7 @@ class PhabricatorStoryStringConstructor:
             return self.__constructDifferentialRevisionRetitleStoryString(), "retitled"
 
         # All other cases are assumed to have this format
-        action = self.action[:-len(" " + self.objID + ": " + self.objTitle)]
+        action = self.action[:-len(" " + self.objID + ": " + self.objTitle + ".")]
 
         string = self.formatting.obscureAuthorName(self.authorName) + " " + \
             action + " " + \
