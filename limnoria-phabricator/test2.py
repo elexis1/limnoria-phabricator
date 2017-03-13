@@ -1,20 +1,36 @@
-from plugin import PhabricatorPrinter
+from plugin import ConduitAPI, PhabricatorStringFormatting, PhabricatorReplyPrinter, PhabricatorStoryPrinter
+
+conduitAPI = ConduitAPI("code.wildfiregames.com", "api-rjjztygm7gwz3jklfj3n75o5eiku")
+formatting = PhabricatorStringFormatting(bolding=False, obscureUsernames=False, htmlLinks=False)
 
 # Allows testing the querying and string construction without connecting to IRC
-
-printer = PhabricatorPrinter(
-    phabricatorURL = "code.wildfiregames.com",
-    token = "your-token-here",
-    storyLimit = 4,
-    sleepTime = 30,
-    newsPrefix = "News from 0 A.D.: ",
-    ignoredUsers = ["Harbormaster", "Vulcan"],
-    obscureUsernames = False,
-    notifyCommit = True,
-    notifyRetitle = True,
-    chronokey = 6378414858781907269,
-    chronokeyFile = None,
+storyPrinter = PhabricatorStoryPrinter(
+    conduitAPI=conduitAPI,
+    formatting=formatting,
+    storyLimit=5,
+    historyForwards=True,
+    timestampAfter=0,
+    timestampBefore=0,
+    sleepTime=3,
+    newsPrefix="",#"News from 0 A.D.: ",
+    printDate=True,
+    ignoredUsers=["Harbormaster", "Vulcan", "autobuild", "php-admin"],
+    filteredUsers=[],
+    notifyCommit=True,
+    notifyRetitle=True,
+    chronokey=None,#6377651517671901321,#6378414858781907269,
+    chronokeyFile=None,
+    verbose=True
 )
+storyPrinter.printStoriesForever(irc=None)
+
+replyPrinter = PhabricatorReplyPrinter(
+    txt=":P",
+    conduitAPI=conduitAPI,
+    formatting=formatting
+)
+
+print(replyPrinter.getReplies())
 
 # some chronokeys (all n-1):
 # 6377663121088159957 tests acceptance of a commit
@@ -28,4 +44,3 @@ printer = PhabricatorPrinter(
 #printer.printRevisions(None, None, "rP12345")
 #printer.printDifferentials(None, None, "D16")
 #printer.printPastes(None, None, "P2")
-printer.pollNewStories(None)

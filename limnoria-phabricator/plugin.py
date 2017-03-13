@@ -3,16 +3,17 @@
 # All rights reserved.
 ###
 
-import supybot.utils as utils
-from supybot.commands import *
+import ssl
 import supybot.conf as conf
-import supybot.plugins as plugins
 import supybot.ircmsgs as ircmsgs
 import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
-import http.client, urllib.parse
+import http.client
+import urllib.parse
+import html
 
 import time
+import datetime
 import threading
 import re
 import os.path
@@ -39,39 +40,61 @@ class Phabricator(callbacks.Plugin):
         self.syncedChannels = []
         self.thread = None
 
-        self.printer = PhabricatorPrinter(
+        self.conduitAPI = ConduitAPI(
             self.registryValue("phabricatorURL"),
             self.registryValue("phabricatorToken"),
-            self.registryValue("storyLimit"),
-            self.registryValue("sleepTime"),
-            self.registryValue("newsPrefix"),
-            self.registryValue("ignoredUsers"),
-            self.registryValue("obscureUsername"),
-            self.registryValue("notifyCommit"),
-            self.registryValue("notifyRetitle"),
-            self.registryValue("chronokeyFile"),
+            self.registryValue("acceptInvalidSSLCert"),
+        )
+
+        self.formatting = PhabricatorStringFormatting(True, self.registryValue("obscureUsernames"), False)
+
+        self.storyPrinter = PhabricatorStoryPrinter(
+            conduitAPI=self.conduitAPI,
+            formatting=self.formatting,
+            storyLimit=self.registryValue("storyLimit"),
+            historyForwards=self.registryValue("historyForwards"),
+            timestampAfter=self.registryValue("timestampAfter"),
+            timestampBefore=self.registryValue("timestampBefore"),
+            sleepTime=self.registryValue("sleepTime"),
+            newsPrefix=self.registryValue("newsPrefix"),
+            printDate=self.registryValue("printDate"),
+            ignoredUsers=self.registryValue("ignoredUsers"),
+            filteredUsers=self.registryValue("filteredUsers"),
+            notifyCommit=self.registryValue("notifyCommit"),
+            notifyRetitle=self.registryValue("notifyRetitle"),
+            chronokeyFile=self.registryValue("chronokeyFile"),
+            chronokey=None,
+            verbose=self.registryValue("verbose")
         )
 
     # Respond to channel and private messages
     def doPrivmsg(self, irc, msg):
-        self.printer.printDifferentials(irc, msg.args[0], msg.args[1])
-        self.printer.printRevisions(irc, msg.args[0], msg.args[1])
-        self.printer.printPastes(irc, msg.args[0], msg.args[1])
+
+        # TODO: check whether it works with actual PMs
+        channel = msg.args[0]
+        strings = PhabricatorReplyPrinter(
+            txt=msg.args[1],
+            conduitAPI=self.conduitAPI,
+            formatting=self.formatting
+        ).getReplies()
+
+        for strng in strings:
+            irc.queueMsg(ircmsgs.privmsg(channel, strng))
 
     def do315(self, irc, msg):
 
         self.syncedChannels.append(msg.args[1])
 
         # Don't send messages before all channels were synced
-        for (channel, c) in irc.state.channels.items():
+        for (channel, _) in irc.state.channels.items():
             if channel not in self.syncedChannels:
                 return
 
         # Notify about recent phabricator stories
-        if (self.thread):
+        if self.thread:
             return
 
-        self.thread = threading.Thread(target=self.printer.pollNewStories, args=(irc,), daemon=True)
+        self.thread = threading.Thread(target=self.storyPrinter.printStoriesForever, args=(irc,), daemon=True)
         self.thread.start()
 
     def doPart(self, irc, msg):
@@ -82,111 +105,103 @@ class Phabricator(callbacks.Plugin):
             if channel in self.syncedChannels:
                 self.syncedChannels.remove(channel)
 
-# Constructs human-readable strings and optionally posts them to IRC.
-# Allows testing of the querying and printing without actually connecting to IRC.
-class PhabricatorPrinter:
+class PhabricatorReplyPrinter:
 
-    def __init__(self, phabricatorURL, token, storyLimit, sleepTime, newsPrefix,
-                 ignoredUsers, obscureUsernames, notifyCommit, notifyRetitle, chronokeyFile=None, chronokey=None):
+    def __init__(self, txt, conduitAPI, formatting):
+        self.txt = txt
+        self.conduitAPI = conduitAPI
+        self.formatting = formatting
 
-        self.conduitAPI = conduitAPI(phabricatorURL, token)
-        self.storyLimit = storyLimit
-        self.sleepTime = sleepTime
-        self.newsPrefix = newsPrefix
-        self.ignoredUsers = ignoredUsers
-        self.obscureUsernames = obscureUsernames
-        self.notifyCommit = notifyCommit
-        self.notifyRetitle = notifyRetitle
-        self.chronokeyFile = chronokeyFile
-        self.chronokey = chronokey
-
-    def bold(self, irc, txt):
-        if not irc:
-            return txt
-        return ircutils.bold(txt)
-
-    # Adds invisible whitespace between characters to
-    # avoid people pinging themselves with updates
-    def obscureAuthorName(self, authorName):
-
-        if self.obscureUsernames:
-            return u"\u200B".join(list(authorName))
-
-        return authorName
+    def getReplies(self):
+        return \
+            self.__differentialReplies() + \
+            self.__commitReplies() + \
+            self.__pasteReplies()
 
     # Display the title and URL of all differential IDs appearing in the text (D123)
-    # Don't obscure the nickname, so that developers are pinged
-    def printDifferentials(self, irc, channel, txt):
+    def __differentialReplies(self):
 
-        matches = re.findall(r"\b(D\d*)\b", txt)
-        revisions = list(map(lambda d : d[1:], matches))
+        matches = re.findall(r"\b(D\d+)\b", self.txt)
+        revisions = list(map(lambda d: d[1:], matches))
         revisions = OrderedDict.fromkeys(revisions, True)
 
-        if revisions is None or len(revisions) == 0:
-            return
+        if revisions is None or len(revisions) == 0 or list(revisions)[0] == "":
+            #print("Fix differnetial revision regex for", self.txt)
+            return []
 
         results = self.conduitAPI.queryDifferentials(revisions)
 
         if results is None:
-            return
+            return []
 
+        strings = []
         for result in results:
-            strng = self.bold(irc, "D" + result["id"]) + ": " + \
-                result["title"] + " [" + result["statusName"] + "] – " + \
-                "<" + result["uri"] + ">"
 
-            if irc:
-                irc.queueMsg(ircmsgs.privmsg(channel, strng))
-            else:
-                print(strng)
+            replyStringConstructor = PhabricatorReplyStringConstructor(
+                objID="D" + result["id"],
+                objLink=result["uri"],
+                objTitle=result["title"],
+                formatting=self.formatting
+            )
+
+            strings.append(replyStringConstructor.constructDifferentialReplyString(
+                statusName=result["statusName"]
+            ))
+
+        return strings
 
     # Display the title and URL of all differential IDs appearing in the text (D123)
-    def printRevisions(self, irc, channel, txt):
+    def __commitReplies(self):
 
-        commitIDs = re.findall(r"\b(rP\d*)\b", txt)
-        commitIDs = list(map(lambda d : d[2:], commitIDs))
+        # fails at ":D" as the colon is considered a word boundary too
+        commitIDs = re.findall(r"\b(rP\d+)\b", self.txt)
+        commitIDs = list(map(lambda d: d[2:], commitIDs))
         commitIDs = OrderedDict.fromkeys(commitIDs, True)
 
-        if commitIDs is None or len(commitIDs) == 0:
-            return
+        if commitIDs is None or len(commitIDs) == 0 or list(commitIDs)[0] == "":
+            #print("Fix commit regex for", self.txt)
+            return []
 
         results = self.conduitAPI.queryCommitsByID(commitIDs).get("data")
 
         if results is None:
-            return
+            return []
 
+        strings = []
         for commitID in commitIDs:
             for commitPHID in results:
 
                 result = results[commitPHID]
-                if result["id"] != commitID:
-                    continue
+                if result["id"] == commitID:
 
-                strng = \
-                    self.bold(irc, "rP" + result["id"] + ".") + " " + \
-                    self.bold(irc, "Author:") + " " + result["authorName"] + ". " + \
-                    self.bold(irc, "Commit message:") + " " + result["summary"] + " " + \
-                    "<" + result["uri"] + ">"
+                    replyStringConstructor = PhabricatorReplyStringConstructor(
+                        objID="rP" + result["id"],
+                        objLink=result["uri"],
+                        objTitle=result["summary"],
+                        formatting=self.formatting,
+                    )
 
-                if irc:
-                    irc.queueMsg(ircmsgs.privmsg(channel, strng))
-                else:
-                    print(strng)
+                    strings.append(replyStringConstructor.constructRevisionReplyString(
+                        authorName=result["authorName"],
+                    ))
+
+        return strings
 
     # Display the title and URL of all differential IDs appearing in the text (D123)
-    def printPastes(self, irc, channel, txt):
+    def __pasteReplies(self):
 
-        pasteIDs = re.findall(r"\b(P\d*)\b", txt)
-        pasteIDs = list(map(lambda d : d[1:], pasteIDs))
+        pasteIDs = re.findall(r"\b(P\d+)\b", self.txt)
+        pasteIDs = list(map(lambda d: d[1:], pasteIDs))
         pasteIDs = OrderedDict.fromkeys(pasteIDs, True)
 
-        if pasteIDs is None or len(pasteIDs) == 0:
-            return
+        if pasteIDs is None or len(pasteIDs) == 0 or list(pasteIDs)[0] == "":
+            #print("Fix paste regex for", self.txt)
+            return []
 
         results = self.conduitAPI.queryPastesByID(pasteIDs)
 
         if results is None:
-            return
+            return []
 
         authorPHIDs = []
         for pastePHID in results:
@@ -196,202 +211,268 @@ class PhabricatorPrinter:
 
         authorNames = self.conduitAPI.queryAuthorNames(authorPHIDs)
 
+        strings = []
         for pasteID in pasteIDs:
             for pastePHID in results:
 
                 result = results[pastePHID]
-                if result["id"] != pasteID:
-                    continue
 
-                strng = \
-                    self.bold(irc, "Paste P" + result["id"] + ".") + " " + \
-                    self.bold(irc, "Author:") + " " + authorNames[result["authorPHID"]] + ". " + \
-                    self.bold(irc, "Title:") + " " + result["title"] + " " + \
-                    "<" + result["uri"] + ">"
+                if result["id"] == pasteID:
+                    replyStringConstructor = PhabricatorReplyStringConstructor(
+                        objID="P" + result["id"],
+                        objTitle=result["title"],
+                        objLink=result["uri"],
+                        formatting=self.formatting
+                    )
 
-                if irc:
-                    irc.queueMsg(ircmsgs.privmsg(channel, strng))
-                else:
-                    print(strng)
+                    strings.append(replyStringConstructor.constructPasteReplyString(
+                        authorName=authorNames[result["authorPHID"]]
+                    ))
 
-    # Running in a separate thread, printing most recent updates on phabricator
-    def pollNewStories(self, irc):
+        return strings
 
-        chronokey = self.loadChronokey() if self.chronokey is None else self.chronokey
+# Constructs human-readable strings and optionally posts them to IRC.
+# Allows testing of the querying and printing without actually connecting to IRC.
+class PhabricatorStoryPrinter:
+
+    def __init__(self,
+                 conduitAPI,
+                 formatting,
+                 storyLimit,
+                 historyForwards,
+                 timestampBefore,
+                 timestampAfter,
+                 sleepTime,
+                 newsPrefix,
+                 printDate,
+                 ignoredUsers,
+                 filteredUsers,
+                 notifyCommit,
+                 notifyRetitle,
+                 chronokeyFile,
+                 chronokey,
+                 verbose
+                ):
+
+        self.conduitAPI = conduitAPI
+        self.formatting = formatting
+
+        self.storyLimit = storyLimit
+        self.historyForwards = historyForwards
+        self.timestampBefore = timestampBefore
+        self.timestampAfter = timestampAfter
+        self.sleepTime = sleepTime
+        self.newsPrefix = newsPrefix
+        self.printDate = printDate
+        self.ignoredUsers = ignoredUsers
+        self.filteredUsers = filteredUsers
+        self.notifyCommit = notifyCommit
+        self.notifyRetitle = notifyRetitle
+        self.chronokeyFile = chronokeyFile
+        self.chronokey = chronokey
+        self.verbose = verbose
+
+        self.chronokeyEpoch = None
+
+    # Repeatedly query and print new stories on phabricator
+    def printStoriesForever(self, irc):
+
+        self.chronokey = self.__loadChronokey()
 
         while True:
             try:
-                print("Pulling Stories")
-                chronokey, strings = self.queryFeedExtended(irc, chronokey)
+                if self.printSomeStories(irc):
+                    return
 
-                for strng in strings:
-                    print(strng)
-                    if irc:
-                        for (channel, c) in irc.state.channels.items():
-                            irc.queueMsg(ircmsgs.privmsg(channel, strng))
-
-                time.sleep(self.sleepTime)
             except KeyboardInterrupt:
                 return
             except:
                 raise
 
-    # Pulls some stories on phabricator that are more recent than the chronokey.
-    # Fetches the refered authors and differentials.
-    # Returns an array of human-readable strings to be posted in irc and the updated chronokey.
-    def queryFeedExtended(self, irc, chronokey):
+    def printSomeStories(self, irc):
 
-        stories, objectPHIDs, authorPHIDs = self.conduitAPI.queryFeed(chronokey, self.storyLimit)
+        stories = self.pullSomeStories()
+        if stories is True:
+            return True
+
+        for story in stories:
+            string, _, _, _, _ = story
+            print(string)
+            if irc:
+                for (channel,_) in irc.state.channels.items():
+                    irc.queueMsg(ircmsgs.privmsg(channel, string))
+
+        time.sleep(self.sleepTime)
+        return False
+
+    # Pulls some stories on phabricator that are more recent or older than the current chronokey.
+    # Fetches the refered authors and differentials.
+    # Returns a list of human-readable strings to be posted in irc and the updated chronokey or
+    #
+    def pullSomeStories(self):
+
+        if self.chronokeyEpoch:
+            if self.historyForwards and self.timestampBefore != 0 and self.chronokeyEpoch > self.timestampBefore or \
+               not self.historyForwards and self.timestampAfter != 0 and self.chronokeyEpoch < self.timestampAfter:
+                if self.verbose:
+                    print("Finished, chronokey is ", self.chronokey)
+                return True
+
+        stories, objectPHIDs, authorPHIDs = self.conduitAPI.queryFeed(self.chronokey, self.storyLimit, self.historyForwards)
         authorNames = self.conduitAPI.queryAuthorNames(authorPHIDs)
         objects = self.conduitAPI.queryObjects(objectPHIDs)
+
+        if not self.historyForwards and len(stories) == 0:
+            if self.verbose:
+                print("No more stories found")
+            return True
 
         # We can't do anything with the transaction PHIDs! Not even getting the sub-URL of the modified object
         # https://secure.phabricator.com/T5873
         # transactions = queryObjects(allTransactionPHIDs)
 
         # Sort by timestamp
-        storiesSorted = sorted(stories, key=lambda story: story[1])
+        storiesSorted = sorted(stories, key=lambda story: story[1], reverse=not self.historyForwards)
 
         strings = []
         for story in storiesSorted:
 
-            storyPHID, newChronokey, epoch, authorPHID, objectPHID, text = story
+            # Extract the objects referenced by this particular story
+            _, newChronokey, epoch, authorPHID, objectPHID, text = story
             objType, objID, objTitle, objLink = objects[objectPHID]
             authorName = authorNames[authorPHID]
 
-            # Go forward in history. Use min to go backwards.
-            previous = chronokey
-            chronokey = max(chronokey, newChronokey)
-            if self.chronokeyFile and previous != chronokey:
-                self.saveChronokey(chronokey)
+            # Remember most recently actually printed story (in the specified chronological order)
+            self.__updateChronokey(newChronokey, epoch)
 
-            if self.ignoredUsers is not None and authorName in self.ignoredUsers:
-                print("Skipping blocked user", authorName)
-                continue
-
+            # TODO: move this to queryAuthorNames
             if authorPHID == "PHID-APPS-PhabricatorDiffusionApplication":
-                print("Fallback: Commit without phabricator account: [" + text + "]")
+                if self.verbose:
+                    print("Fallback: Commit without phabricator account: [" + text + "]")
                 authorName = self.conduitAPI.queryCommitsByID(objID[len("rP"):]).get("data")[objectPHID]["author"]
 
-            # Clumsy parsing of the "text" property of the feed.query api results, since transactionPHIDs can't be queried yet
-            action = text[len(authorName + " "):]
-
-            if objType == "Differential Revision":
-
-                # contrary to other actions, this one extends the string by the added reviewer
-                addedReviewerAction = "added a reviewer for"
-                addedReviewer = action[len(addedReviewerAction + " " + objID + ": " + objTitle + ": "):-len(".")]
-                if action.startswith(addedReviewerAction):
-                    strings.append(self.newsPrefix + \
-                        self.obscureAuthorName(authorName) + " " + \
-                        "added " + \
-                        self.obscureAuthorName(addedReviewer) + " " + \
-                        "as a reviewer for " + \
-                        self.bold(irc, objID) + " (" + objTitle + ") " + \
-                        "<" + objLink + ">.")
-                    continue
-
-                action = action[:-len(" " + objID + ": " + objTitle + ".")]
-
-                if action == "retitled" and not self.notifyRetitle:
-                    print("Skipping retitle of", objID)
-                    continue
-
-                strings.append(self.newsPrefix + \
-                    self.obscureAuthorName(authorName) + " " + \
-                    action + " " + \
-                    self.bold(irc, objID) + " (" + objTitle + ") " + \
-                    "<" + objLink + ">.")
+            if self.__filterDate(epoch, True) or self.__filterUser(authorName):
                 continue
 
-            if objType == "Diffusion Commit":
-                action = action[:-len(" " + objID + ": " + objTitle + ".")]
-                if action == "committed" and not self.notifyCommit:
-                    print("Skipping commit", objID, objTitle)
-                    continue
+            # Create a string from the parsed story data and referenced objects
+            storyString = PhabricatorStoryStringConstructor(
+                objType,
+                objectPHID,
+                objID,
+                objTitle,
+                objLink,
+                authorName,
+                text,
+                self.notifyCommit,
+                self.notifyRetitle,
+                self.formatting,
+                self.verbose
+            ).constructStoryString()
 
-                strings.append(self.newsPrefix + \
-                    self.obscureAuthorName(authorName) + " " + \
-                    action + " " + \
-                    self.bold(irc, objID) + " (" + objTitle + ") " + \
-                    "<" + objLink + ">.")
+            try:
+                string, action = storyString
+            except TypeError:
+                print("constructStoryString returned non-iterable", storyString, "from", text)
                 continue
 
-            if objType == "Paste":
-                # Notice the missing colon between ID and Title
-                action = action[:-len(" " + objID + " " + objTitle + ".")]
-                strings.append(self.newsPrefix + \
-                    self.obscureAuthorName(authorName) + " " + \
-                    action + " " + \
-                    self.bold(irc, objID) + " (" + objTitle + ") " + \
-                    "<" + objLink + ">.")
+            if string is None:
                 continue
 
-            if objType == "Project":
-                addedMemberAction = "added a member for"
-                if (action.startswith(addedMemberAction)):
-                    addedMember = action[len(addedMemberAction + " " + objTitle + ": "):-len(".")]
-                    strings.append(self.newsPrefix + \
-                        self.obscureAuthorName(authorName) + " " + \
-                        "added " + \
-                        self.obscureAuthorName(addedMember) + " " + \
-                        "as a member to " + \
-                        self.bold(irc, objTitle) + " " \
-                        "<" + objLink + ">.")
-                    continue
+            datePrefix = datetime.datetime.fromtimestamp(epoch).strftime('[%Y-%m-%d %H:%M:%S] ') if self.printDate else ""
+            string = datePrefix + self.newsPrefix + string
+            strings.append((string, authorName, objID, objType, action))
 
-                addedMembersAction = "added members for"
-                if (action.startswith(addedMembersAction)):
-                    addedMembers = action[len(addedMembersAction + " " + objTitle + ": "):-len(".")].split(", ")
-                    strings.append(self.newsPrefix + \
-                        self.obscureAuthorName(authorName) + " " + \
-                        "added " + \
-                        ", ".join(map(lambda member: self.obscureAuthorName(member), addedMembers)) + " " + \
-                        "as members to " + \
-                        self.bold(irc, objTitle) + " " \
-                        "<" + objLink + ">.")
-                    continue
+        return strings
 
-                editPolicyAction = "changed the edit policy for"
-                if (action.startswith(editPolicyAction)):
-                    strings.append(self.newsPrefix + \
-                        self.obscureAuthorName(authorName) + " " + \
-                        editPolicyAction + " " + \
-                        self.bold(irc, objTitle) + " " \
-                        "<" + objLink + ">.")
-                    continue
+    def __filterUser(self, authorName):
 
-            print("Unexpected object type '" + objType + "'", objectPHID)
+        if self.ignoredUsers is not None and authorName in self.ignoredUsers:
+            if self.verbose:
+                print("Skipping blocked user", authorName)
+            return True
 
-        return chronokey, strings
+        if self.filteredUsers and len(self.filteredUsers) and authorName not in self.filteredUsers:
+            if self.verbose:
+                print("Skipping non-filtered user", authorName)
+            return True
+
+        return False
+
+    def __filterDate(self, timestamp, debugPrint):
+
+        if self.timestampAfter != 0 and timestamp < self.timestampAfter:
+            if self.verbose:
+                print("Skipping story that is too old")
+            return True
+
+        if self.timestampBefore != 0 and timestamp > self.timestampBefore:
+            if self.verbose:
+                print("Skipping story that is too recent")
+            return True
+
+        return False
 
     # Remember the chronological entry of the most recently
     # processed or printed update on phabricator
-    def loadChronokey(self):
+    # Returns None or number
+    def __loadChronokey(self):
+
+        if self.chronokeyFile is None:
+            return self.chronokey
 
         if not os.path.isfile(self.chronokeyFile):
             print(self.chronokeyFile, "not found, starting at 0")
-            return 0
+            return self.chronokey
 
         return int(open(self.chronokeyFile, 'r').read())
 
     # Save the state immediately after processing a message,
     # so that we don't lose the state after a crash
-    def saveChronokey(self, chronokey):
-        print("Saving chronokey", chronokey)
+    def __saveChronokey(self, chronokey):
+
+        if self.verbose:
+            print("Saving chronokey", chronokey)
+
         text_file = open(self.chronokeyFile, "w")
         text_file.write(str(chronokey) + "\n")
         text_file.close()
 
+    def __updateChronokey(self, newChronokey, newEpoch):
+
+        if self.chronokeyEpoch is None:
+            self.chronokeyEpoch = newEpoch
+
+        if self.chronokey is None:
+            if self.verbose:
+                print("Initializing chronokey with", newChronokey)
+            self.chronokey = newChronokey
+            return
+
+        previous = self.chronokey
+        if self.historyForwards:
+            self.chronokey = max(self.chronokey, newChronokey)
+            self.chronokeyEpoch = max(self.chronokeyEpoch, newEpoch)
+        else:
+            self.chronokey = min(self.chronokey, newChronokey)
+            self.chronokeyEpoch  = min(self.chronokeyEpoch, newEpoch)
+
+        if previous == self.chronokey:
+            return
+
+        if self.verbose:
+            print("New chronokey:", self.chronokey)
+
+        if self.chronokeyFile:
+            self.__saveChronokey(self.chronokey)
 
 # Provides some abstraction and parsing of the RESTful Phabricator API
-import datetime
 import json
-class conduitAPI:
+class ConduitAPI:
 
-    def __init__(self, phabricatorURL, token):
-        self.token = token
+    def __init__(self, phabricatorURL, phabricatorToken, acceptInvalidSSLCert):
+        self.phabricatorToken = phabricatorToken
         self.phabricatorURL = phabricatorURL
+        self.acceptInvalidSSLCert = acceptInvalidSSLCert
 
     # Send an HTTPS GET request to the phabricator location and
     # return the interpreted JSON object
@@ -401,22 +482,22 @@ class conduitAPI:
             print("Error: You must configure the Phabricator location!")
             return None
 
-        if self.token is None or self.token == "":
+        if self.phabricatorToken is None or self.phabricatorToken == "":
             print("Error: You must configure a Phabricator API token!")
             return None
 
-        params["api.token"] = self.token
+        params["api.token"] = self.phabricatorToken
 
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Charset": "utf-8"
         }
 
-        conn = http.client.HTTPSConnection(self.phabricatorURL)
+        conn = http.client.HTTPSConnection(self.phabricatorURL, context=ssl._create_unverified_context() if self.acceptInvalidSSLCert else None)
         conn.request("GET", path, urllib.parse.urlencode(params, True), headers)
         response = conn.getresponse()
 
-        if (response.status != 200):
+        if response.status != 200:
             print(response.status, response.reason)
             conn.close()
             return None
@@ -439,7 +520,7 @@ class conduitAPI:
         if len(phids) == 0:
             return []
 
-        return self.queryAPI("/api/phid.query", { "phids[]": phids })
+        return self.queryAPI("/api/phid.query", {"phids[]": phids})
 
     # Retrieve account names of the given author URLs
     def queryAuthorNames(self, authorPHIDs):
@@ -509,13 +590,23 @@ class conduitAPI:
 
     # Fetches some phabricator stories after the given chronological key,
     # Only yields story PHID, author PHIDs and the PHIDs of the associated object
-    def queryFeed(self, chronokey, limit):
+    def queryFeed(self, chronokey, storyLimit, historyForwards):
 
-        results = self.queryAPI("/api/feed.query", {
-            "before": chronokey, # TODO: why isn't this "after"?
-            'limit': limit,
+        arguments = {
+            'limit': storyLimit,
             'view': "text"
-        })
+        }
+
+        # Query stories before or after the given chronokey,
+        # otherwise query for the most recent ones (as of now)
+        if chronokey is not None:
+            if historyForwards:
+                arguments["before"] = chronokey
+            else:
+                arguments["after"] = chronokey
+
+        print("Pulling", storyLimit, "stories")
+        results = self.queryAPI("/api/feed.query", arguments)
 
         if results is None:
             return [], [], []
@@ -529,10 +620,8 @@ class conduitAPI:
             epoch = int(results[storyPHID]["epoch"])
             newChronokey = int(results[storyPHID]["chronologicalKey"])
 
-            # If we don't recall the last
-            if chronokey == 0 and epoch < datetime.utcnow():
-                print("Ignoring outdated story from", newChronokey)
-                continue
+            if chronokey is None:
+                chronokey = newChronokey
 
             authorPHID = results[storyPHID]["authorPHID"]
             if authorPHID not in authorPHIDs:
@@ -552,5 +641,297 @@ class conduitAPI:
             stories.append((storyPHID, newChronokey, epoch, authorPHID, objectPHID, text))
 
         return stories, objectPHIDs, authorPHIDs #, allTransactionPHIDs
+
+class PhabricatorStringFormatting:
+
+    def __init__(self, bolding, obscureUsernames, htmlLinks):
+        self.bolding = bolding
+        self.obscureUsernames = obscureUsernames
+        self.htmlLinks = htmlLinks
+
+    def bold(self, txt):
+        if not self.bolding:
+            return txt
+        return ircutils.bold(txt)
+
+    # Adds invisible whitespace between characters to
+    # avoid people pinging themselves with updates
+    def obscureAuthorName(self, authorName):
+        if not self.obscureUsernames:
+            return authorName
+        return u"\u200B".join(list(authorName))
+
+    def formatLink(self, url):
+        if not self.htmlLinks:
+            return "<" + url + ">"
+        return "<a href=\"" + url + "\">" + html.escape("<" + url + ">") + "</a>"
+
+class PhabricatorReplyStringConstructor:
+
+    def __init__(self, objID, objTitle, objLink, formatting):
+        self.objID = objID
+        self.objTitle = objTitle
+        self.objLink = objLink
+        self.formatting = formatting
+
+    def constructDifferentialReplyString(self, statusName):
+        return self.formatting.bold(self.objID) + ": " + self.objTitle + " [" + statusName + "] – " + \
+            self.formatting.formatLink(self.objLink)
+
+    def constructRevisionReplyString(self, authorName):
+        return self.formatting.bold(self.objID) + " " + \
+            self.formatting.bold("Author:") + " " + self.formatting.obscureAuthorName(authorName) + ". " + \
+            self.formatting.bold("Commit message:") + " " + self.objTitle + " " + \
+            self.formatting.formatLink(self.objLink)
+
+    def constructPasteReplyString(self, authorName):
+        return self.formatting.bold("Paste " + self.objID) + " " + \
+            self.formatting.bold("Author:") + " " + self.formatting.obscureAuthorName(authorName) + ". " + \
+            self.formatting.bold("Title:") + " " + self.objTitle+ " " + \
+            self.formatting.formatLink(self.objLink)
+
+class PhabricatorStoryStringConstructor:
+
+    def __init__(self, objType, objectPHID, objID, objTitle, objLink, authorName, text, notifyCommit, notifyRetitle, formatting, verbose):
+        self.objType = objType
+        self.objectPHID = objectPHID
+        self.objID = objID
+        self.objTitle = objTitle
+        self.objLink = objLink
+        self.authorName = authorName
+        self.text = text
+        self.formatting = formatting
+        self.notifyCommit = notifyCommit
+        self.notifyRetitle = notifyRetitle
+        self.verbose = verbose
+
+        # Clumsy parsing of the "text" property of the feed.query api results, since transactionPHIDs can't be queried yet
+        self.action = self.text[len(self.authorName + " "):]
+
+    # Returns the string and the action identifier
+    def constructStoryString(self):
+
+        if self.objType == "Differential Revision":
+            return self.__constructDifferentialRevisionStoryString()
+
+        if self.objType == "Diffusion Commit":
+            return self.__constructCommitStoryString()
+
+        if self.objType == "Paste":
+            return self.__constructPasteStoryString()
+
+        if self.objType == "Project":
+            return self.__constructProjectStoryString()
+
+        if self.objType == "Image Macro":
+            return self.__constructImageMacroStoryString()
+
+        print("Unexpected object type '" + self.objType + "'", self.objectPHID)
+        return None, None
+
+    def __constructDifferentialRevisionStoryString(self):
+
+        # TODO: lookup the file that contains the strings, link it, add remaining strings
+        supportedActions = (
+            "created",
+            "retitled",
+            "closed",
+            "accepted",
+            "awarded",
+            "resigned from",
+            "abandoned",
+            "reclaimed",
+            "commandeered",
+            "added a dependency for",
+            "added a dependent revision for",
+            "removed a project from",
+            "planned changes to",
+            "requested review of",
+            "added a reviewer for",
+            "removed a reviewer for",
+            "edited reviewers for",
+            "removed 1 commit(s)",
+            "added 1 commit(s)",
+            # TODO: removed reviewers for?
+            "failed to build",
+            "added reviewers for", # TODO: that query is messed up e​l​e​x​i​s added reviewers for D188: Whales shou D188 (Whales should not block ships) <https://code.wildfiregames.com/D188>.
+            "added a comment to", # TODO: extra space
+            "added inline comments to",
+            "updated",
+            "updated the summary of",
+            "updated the diff for",
+            "updated subscribers of",
+            "updated the Trac tickets for",
+            "updated the test plan for",
+            "requested changes to",
+            "changed the visibility for",
+            "set the repository for",
+        )
+
+        if not self.action.startswith(supportedActions):
+            print("WARNING! unsupported differential revision action:", self.action)
+
+        # contrary to other actions, this one extends the string by the added reviewer
+        if self.action.startswith("added a reviewer for"):
+            return self.__constructDifferentialRevisionReviewerAddedStoryString(), "added a reviewer for"
+
+        if self.action.startswith("closed"):
+            return self.__constructDifferentialRevisionCloseStoryString(), "closed"
+
+        if self.action.startswith("set the repository for"):
+            return self.__constructDifferentialRevisionSetRepositoryStoryString(), "set the repository for"
+
+        if self.action.startswith("awarded"):
+            return self.__constructDifferentialRevisionAwardedStoryString(), "awarded"
+
+        if self.action.startswith("retitled"):
+            return self.__constructDifferentialRevisionRetitleStoryString(), "retitled"
+
+        # All other cases are assumed to have this format
+        action = self.action[:-len(" " + self.objID + ": " + self.objTitle)]
+
+        string = self.formatting.obscureAuthorName(self.authorName) + " " + \
+            action + " " + \
+            self.formatting.bold(self.objID) + " (" + self.objTitle + ") " + \
+            self.formatting.formatLink(self.objLink)
+
+        return string, action
+
+    def __constructGenericStoryString(self, action):
+        string = self.formatting.obscureAuthorName(self.authorName) + \
+            " " + action + " " + \
+            self.formatting.bold(self.objID) + " (" + self.objTitle + ") " + \
+            self.formatting.formatLink(self.objLink)
+        return string
+
+    def __constructDifferentialRevisionRetitleStoryString(self):
+
+        # We don't print the previous title which is sent by the conduitAPI
+        if not self.notifyRetitle:
+            if self.verbose:
+                print("Skipping retitle of", self.objID)
+            return None
+        return self.__constructGenericStoryString("retitled")
+
+    def __constructDifferentialRevisionReviewerAddedStoryString(self):
+        # TODO: broken string: e​l​e​x​i​s added e​O​b​j​e​c​t​s​:​ ​e​l​e​x​i​s as a reviewer for D189 (Extending rmgen lib's SimpleGroup's place method to avoid collision of included SimpleObjects) <https://code.wildfiregames.com/D189>.
+        addedReviewer = self.action[len("added a reviewer for" + " " + self.objID + ": " + self.objTitle + ": "):-len(".")]
+        return self.__constructGenericStoryString(
+            "added " + \
+            self.formatting.obscureAuthorName(addedReviewer) + \
+            " as a reviewer for")
+
+    def __constructDifferentialRevisionAwardedStoryString(self):
+        token = self.action[len("awarded " + self.objID + ": " + self.objTitle + " a "):-len(" token.")]
+        return self.__constructGenericStoryString("gave a " + token + " award to ")
+
+    def __constructDifferentialRevisionCloseStoryString(self):
+
+        #by = self.action[len("closed " + self.objID + ": " + self.objTitle):-len(".")]
+
+        #if not by:
+        return self.__constructGenericStoryString("closed")
+
+        #commitID = by[len(" by committing"):].split(":", 1)[0]
+        #return self.__constructGenericStoryString("closed by committing " + commitID)
+
+    def __constructDifferentialRevisionSetRepositoryStoryString(self):
+        # This cuts off the repetition of the object title in the action string
+        return self.__constructGenericStoryString("set the repository for")
+
+    def __constructCommitStoryString(self):
+
+        supportedActions = (
+            "committed",
+            "added a comment to",
+            "added inline comments to",
+            "raised a concern with",
+            "accepted",
+            "added auditors to", # TODO: contains auditor name
+            "edited edges for",
+            "added an edge to",
+            "requested verification of",
+            "updated subscribers of",
+            # TODO awarded
+        )
+
+        if self.action.startswith("committed"):
+            if not self.notifyCommit:
+                if self.verbose:
+                    print("Skipping commit", self.objID, self.objTitle)
+                return None, None
+            return self.__constructGenericStoryString("committed"), "committed"
+
+        for action in supportedActions:
+            if self.action.startswith(action):
+                return self.__constructGenericStoryString(action), action
+
+        print("Unknown commit story type:", self.action)
+        return None, None
+
+    def __constructPasteStoryString(self):
+
+        supportedActions = (
+            "created",
+            "edited",
+            "archived",
+            "added a comment to",
+            "updated the title for",
+            "updated the language for",
+            "changed the visibility for"
+        )
+
+        if not self.action.startswith(supportedActions):
+            print("Unknown paste story type:", self.action)
+            return None, None
+
+        # Notice the missing colon between ID and Title
+        action = self.action[:-len(" " + self.objID + " " + self.objTitle)]
+
+        return self.__constructGenericStoryString(action), action
+
+    # Almost never new projects are created, so meh
+    def __constructProjectStoryString(self):
+
+        # TODO: created
+
+        addedMemberAction = "added a member for"
+        if self.action.startswith(addedMemberAction):
+            addedMember = self.action[len(addedMemberAction + " " + self.objTitle + ": "):-len(".")]
+            return self.__constructGenericStoryString(
+                "added " + \
+                self.formatting.obscureAuthorName(addedMember) + " " + \
+                "as a member to"
+            ), addedMemberAction
+            # TODO: should the one above really contain the objectID?
+            #return self.formatting.obscureAuthorName(self.authorName) + " " + \
+            #    "added " + \
+            #    self.formatting.obscureAuthorName(addedMember) + " " + \
+            #    "as a member to " + \
+            #    self.formatting.bold(self.objTitle) + " " \
+            #    self.formatting.formatLink(self.objLink)
+
+        addedMembersAction = "added members for"
+        if self.action.startswith(addedMembersAction):
+            addedMembers = self.action[len(addedMembersAction + " " + self.objTitle + ": "):-len(".")].split(", ")
+            return self.formatting.obscureAuthorName(self.authorName) + " " + \
+                "added " + \
+                ", ".join(map(lambda member: self.formatting.obscureAuthorName(member), addedMembers)) + " " + \
+                "as members to " + \
+                self.formatting.bold(self.objTitle) + " " + \
+                self.formatting.formatLink(self.objLink), addedMembersAction
+
+        editPolicyAction = "changed the edit policy for"
+        if self.action.startswith(editPolicyAction):
+            return self.formatting.obscureAuthorName(self.authorName) + " " + \
+                editPolicyAction + " " + \
+                self.formatting.bold(self.objTitle) + " " + \
+                self.formatting.formatLink(self.objLink), editPolicyAction
+
+        print("Unsupported project story action:", self.action)
+        return None, None
+
+    def __constructImageMacroStoryString(self):
+        return None, None
 
 Class = Phabricator
