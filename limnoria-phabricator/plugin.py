@@ -51,6 +51,7 @@ class Phabricator(callbacks.Plugin):
         self.storyPrinter = PhabricatorStoryPrinter(
             conduitAPI=self.conduitAPI,
             formatting=self.formatting,
+            channels=self.registryValue("channels"),
             storyLimit=self.registryValue("storyLimit"),
             historyForwards=self.registryValue("historyForwards"),
             timestampAfter=self.registryValue("timestampAfter"),
@@ -238,6 +239,7 @@ class PhabricatorStoryPrinter:
     def __init__(self,
                  conduitAPI,
                  formatting,
+                 channels,
                  storyLimit,
                  historyForwards,
                  timestampBefore,
@@ -255,6 +257,7 @@ class PhabricatorStoryPrinter:
                 ):
 
         self.conduitAPI = conduitAPI
+        self.channels = channels
         self.formatting = formatting
 
         self.storyLimit = storyLimit
@@ -300,7 +303,8 @@ class PhabricatorStoryPrinter:
             print(string)
             if irc:
                 for (channel,_) in irc.state.channels.items():
-                    irc.queueMsg(ircmsgs.privmsg(channel, string))
+                    if not self.channels or channel in self.channels:
+                        irc.queueMsg(ircmsgs.privmsg(channel, string))
 
         time.sleep(self.sleepTime)
         return False

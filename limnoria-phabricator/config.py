@@ -29,6 +29,9 @@ def configure(advanced):
     Phabricator.acceptInvalidSSLCert.setValue(
         something("Accept invalid SSL certificates?", default=False))
 
+    Phabricator.channels.setValue(
+        anything("On which irc channels the bot should post Phabricator updates. If empty, prints on each joined channel.", default="", acceptEmpty=True))
+
     Phabricator.storyLimit.setValue(
         something("Number of stories to pull at most per HTTP request", default=5))
 
@@ -83,6 +86,9 @@ conf.registerGlobalValue(Phabricator, 'phabricatorToken',
 
 conf.registerGlobalValue(Phabricator, 'acceptInvalidSSLCert',
     registry.Boolean(False, _("Whether to accept invalid SSL certificates.")))
+
+conf.registerGlobalValue(Phabricator, 'channels',
+    registry.SpaceSeparatedListOfStrings("", _("List of channels on which the bot posts Phabricator updates. If empty, prints on each joined channel.")))
 
 conf.registerGlobalValue(Phabricator, 'storyLimit',
     registry.PositiveInteger(5, _("Limit of phabricator updates to pull information about in one request.")))
