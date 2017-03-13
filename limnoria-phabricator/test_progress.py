@@ -40,7 +40,8 @@ def printAuthorStories(previousAuthor, authorName, currentAuthorStories, handled
 def progressReport(authorNames, start, end):
 
     storyPrinter = PhabricatorStoryPrinter(
-        conduitAPI = ConduitAPI("code.wildfiregames.com", "api-rjjztygm7gwz3jklfj3n75o5eiku"),
+        conduitAPI = ConduitAPI("code.wildfiregames.com", "insert-api-token-here", acceptInvalidSSLCert=False),
+        channels=None,
         formatting = PhabricatorStringFormatting(bolding=False, obscureUsernames=False, htmlLinks=useHTML),
         storyLimit=200,
         historyForwards=False,
@@ -152,6 +153,7 @@ meetDates = [
     datetime.datetime(2017, 2, 20, 6, 56), #5
     datetime.datetime(2017, 2, 27, 15, 17), #6
     datetime.datetime(2017, 3, 6, 5, 17), #7
+    datetime.datetime(2017, 3, 13, 5, 29), #8
 ]
 
 targetMeeting = len(meetDates) - 1;
