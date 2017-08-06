@@ -84,6 +84,9 @@ class Phabricator(callbacks.Plugin):
 
     def do315(self, irc, msg):
 
+        print("do315 in ", msg.args[1])
+        print("current channels:", irc.state.channels.items())
+
         self.syncedChannels.append(msg.args[1])
 
         # Don't send messages before all channels were synced
@@ -91,8 +94,11 @@ class Phabricator(callbacks.Plugin):
             if channel not in self.syncedChannels:
                 return
 
+        print("all channels synced", msg.args[1])
+
         # Notify about recent phabricator stories
         if self.thread:
+            print("thread still already running")
             return
 
         self.thread = threading.Thread(target=self.storyPrinter.printStoriesForever, args=(irc,), daemon=True)
@@ -104,6 +110,7 @@ class Phabricator(callbacks.Plugin):
 
         for channel in msg.args[0].split(','):
             if channel in self.syncedChannels:
+                print("parting from ", channel)
                 self.syncedChannels.remove(channel)
 
 class PhabricatorReplyPrinter:
