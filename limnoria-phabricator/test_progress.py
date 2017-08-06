@@ -69,6 +69,7 @@ def progressReport(authorNames, start, end):
         "Gallaecio",
         "LordGood",
         "Pureon",
+        "fcxSanya",
         "FeXoR",
         "fabio",
         "scythetwirler",
@@ -78,6 +79,9 @@ def progressReport(authorNames, start, end):
         "leper",
         "fatherbushido",
         "wraitii",
+        "sanderd17",
+        "s0600204",
+        "bb"
     ]
 
     objTypes = ["Differential Revision", "Diffusion Commit"]
@@ -154,6 +158,16 @@ meetDates = [
     datetime.datetime(2017, 2, 27, 15, 17), #6
     datetime.datetime(2017, 3, 6, 5, 17), #7
     datetime.datetime(2017, 3, 13, 5, 29), #8
+    datetime.datetime(2017, 3, 20, 4, 30), #9
+    datetime.datetime(2017, 3, 27, 5, 00), #10
+    datetime.datetime(2017, 4, 3, 5, 00), #11
+    datetime.datetime(2017, 4, 9, 18, 00), #12
+    datetime.datetime(2017, 4, 17, 6, 00), #13
+    datetime.datetime(2017, 4, 24, 6, 00), #14
+    datetime.datetime(2017, 5, 1, 8, 00), #15
+    datetime.datetime(2017, 5, 7, 22, 00), #16
+    datetime.datetime(2017, 5, 15, 6, 00), #17
+    datetime.datetime(2017, 5, 22, 6, 00), #18
 ]
 
 targetMeeting = len(meetDates) - 1;
