@@ -10,6 +10,7 @@ import supybot.ircutils as ircutils
 import supybot.callbacks as callbacks
 import http.client
 import urllib.parse
+import socket
 import html
 
 import time
@@ -44,6 +45,7 @@ class Phabricator(callbacks.Plugin):
             self.registryValue("phabricatorURL"),
             self.registryValue("phabricatorToken"),
             self.registryValue("acceptInvalidSSLCert"),
+            self.registryValue("httpTimeout"),
         )
 
         self.formatting = PhabricatorStringFormatting(True, self.registryValue("obscureUsernames"), False)
@@ -138,7 +140,6 @@ class PhabricatorReplyPrinter:
             return []
 
         results = self.conduitAPI.queryDifferentials(revisions)
-
         if results is None:
             return []
 
@@ -170,10 +171,10 @@ class PhabricatorReplyPrinter:
             #print("Fix commit regex for", self.txt)
             return []
 
-        results = self.conduitAPI.queryCommitsByID(commitIDs).get("data")
-
+        results = self.conduitAPI.queryCommitsByID(commitIDs)
         if results is None:
             return []
+        results = results.get("data")
 
         strings = []
         for commitID in commitIDs:
@@ -207,7 +208,6 @@ class PhabricatorReplyPrinter:
             return []
 
         results = self.conduitAPI.queryPastesByID(pasteIDs)
-
         if results is None:
             return []
 
@@ -218,6 +218,8 @@ class PhabricatorReplyPrinter:
                 authorPHIDs.append(authorPHID)
 
         authorNames = self.conduitAPI.queryAuthorNames(authorPHIDs)
+        if authorNames is None:
+            return []
 
         strings = []
         for pasteID in pasteIDs:
@@ -319,7 +321,7 @@ class PhabricatorStoryPrinter:
     # Pulls some stories on phabricator that are more recent or older than the current chronokey.
     # Fetches the refered authors and differentials.
     # Returns a list of human-readable strings to be posted in irc and the updated chronokey or
-    #
+    # Returns True if all stories in that timeframe have been processed already.
     def pullSomeStories(self):
 
         if self.chronokeyEpoch:
@@ -330,8 +332,14 @@ class PhabricatorStoryPrinter:
                 return True
 
         stories, objectPHIDs, authorPHIDs = self.conduitAPI.queryFeed(self.chronokey, self.storyLimit, self.historyForwards)
+
         authorNames = self.conduitAPI.queryAuthorNames(authorPHIDs)
+        if authorNames is None:
+            return []
+
         objects = self.conduitAPI.queryObjects(objectPHIDs)
+        if objects is None:
+            return []
 
         if not self.historyForwards and len(stories) == 0:
             if self.verbose:
@@ -353,14 +361,17 @@ class PhabricatorStoryPrinter:
             objType, objID, objTitle, objLink = objects[objectPHID]
             authorName = authorNames[authorPHID]
 
-            # Remember most recently actually printed story (in the specified chronological order)
-            self.__updateChronokey(newChronokey, epoch)
-
             # TODO: move this to queryAuthorNames
             if authorPHID == "PHID-APPS-PhabricatorDiffusionApplication":
                 if self.verbose:
                     print("Fallback: Commit without phabricator account: [" + text + "]")
-                authorName = self.conduitAPI.queryCommitsByID(objID[len("rP"):]).get("data")[objectPHID]["author"]
+                authorName = self.conduitAPI.queryCommitsByID(objID[len("rP"):])
+                if authorName is None:
+                    return []
+                authorName = authorName.get("data")[objectPHID]["author"]
+
+            # Remember most recently actually printed story (in the specified chronological order)
+            self.__updateChronokey(newChronokey, epoch)
 
             if self.__filterDate(epoch, True) or self.__filterUser(authorName):
                 continue
@@ -480,10 +491,11 @@ class PhabricatorStoryPrinter:
 import json
 class ConduitAPI:
 
-    def __init__(self, phabricatorURL, phabricatorToken, acceptInvalidSSLCert):
+    def __init__(self, phabricatorURL, phabricatorToken, acceptInvalidSSLCert, httpTimeout):
         self.phabricatorToken = phabricatorToken
         self.phabricatorURL = phabricatorURL
         self.acceptInvalidSSLCert = acceptInvalidSSLCert
+        self.httpTimeout = httpTimeout
 
     # Send an HTTPS GET request to the phabricator location and
     # return the interpreted JSON object
@@ -504,9 +516,18 @@ class ConduitAPI:
             "Charset": "utf-8"
         }
 
-        conn = http.client.HTTPSConnection(self.phabricatorURL, context=ssl._create_unverified_context() if self.acceptInvalidSSLCert else None)
-        conn.request("GET", path, urllib.parse.urlencode(params, True), headers)
-        response = conn.getresponse()
+        conn = http.client.HTTPSConnection(
+            self.phabricatorURL,
+            context=ssl._create_unverified_context() if self.acceptInvalidSSLCert else None,
+            timeout=self.httpTimeout)
+
+        try:
+            conn.request("GET", path, urllib.parse.urlencode(params, True), headers)
+            response = conn.getresponse()
+        # This is supposedly TimeoutError, but not when testing
+        except socket.timeout:
+            print("Timeout at", path)
+            return None
 
         if response.status != 200:
             print(response.status, response.reason)
@@ -539,7 +560,7 @@ class ConduitAPI:
         results = self.queryPHIDs(authorPHIDs)
 
         if results is None:
-            return {}
+            return None
 
         authorNames = {}
         for authorPHID in results:

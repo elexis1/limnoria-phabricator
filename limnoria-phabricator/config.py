@@ -29,6 +29,9 @@ def configure(advanced):
     Phabricator.acceptInvalidSSLCert.setValue(
         something("Accept invalid SSL certificates?", default=False))
 
+    Phabricator.httpTimeout.setValue(
+        something("HTTP timeout", default=40))
+
     Phabricator.channels.setValue(
         anything("On which irc channels the bot should post Phabricator updates. If empty, prints on each joined channel.", default="", acceptEmpty=True))
 
@@ -86,6 +89,9 @@ conf.registerGlobalValue(Phabricator, 'phabricatorToken',
 
 conf.registerGlobalValue(Phabricator, 'acceptInvalidSSLCert',
     registry.Boolean(False, _("Whether to accept invalid SSL certificates.")))
+
+conf.registerGlobalValue(Phabricator, 'httpTimeout',
+    registry.PositiveInteger(40, _("How long to wait for HTTP(S) responses until aborting the request.")))
 
 conf.registerGlobalValue(Phabricator, 'channels',
     registry.SpaceSeparatedListOfStrings("", _("List of channels on which the bot posts Phabricator updates. If empty, prints on each joined channel.")))

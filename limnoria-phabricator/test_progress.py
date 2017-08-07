@@ -40,7 +40,7 @@ def printAuthorStories(previousAuthor, authorName, currentAuthorStories, handled
 def progressReport(authorNames, start, end):
 
     storyPrinter = PhabricatorStoryPrinter(
-        conduitAPI = ConduitAPI("code.wildfiregames.com", "insert-api-token-here", acceptInvalidSSLCert=False),
+        conduitAPI = ConduitAPI("code.wildfiregames.com", "insert-api-token-here", acceptInvalidSSLCert=False, httpTimeout=60),
         channels=None,
         formatting = PhabricatorStringFormatting(bolding=False, obscureUsernames=False, htmlLinks=useHTML),
         storyLimit=200,

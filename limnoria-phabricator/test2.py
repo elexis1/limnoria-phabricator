@@ -1,6 +1,6 @@
 from plugin import ConduitAPI, PhabricatorStringFormatting, PhabricatorReplyPrinter, PhabricatorStoryPrinter
 
-conduitAPI = ConduitAPI("code.wildfiregames.com", "insert-api-token-here", acceptInvalidSSLCert=False)
+conduitAPI = ConduitAPI("code.wildfiregames.com", "insert-api-token-here", acceptInvalidSSLCert=False, httpTimeout=60)
 formatting = PhabricatorStringFormatting(bolding=False, obscureUsernames=False, htmlLinks=False)
 
 # Allows testing the querying and string construction without connecting to IRC
