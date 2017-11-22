@@ -125,7 +125,6 @@ class PhabricatorReplyPrinter:
     def getReplies(self):
         return \
             self.__differentialReplies() + \
-            self.__commitReplies() + \
             self.__pasteReplies()
 
     # Display the title and URL of all differential IDs appearing in the text (D123)
@@ -159,42 +158,6 @@ class PhabricatorReplyPrinter:
 
         return strings
 
-    # Display the title and URL of all differential IDs appearing in the text (D123)
-    def __commitReplies(self):
-
-        # fails at ":D" as the colon is considered a word boundary too
-        commitIDs = re.findall(r"\b(rP\d+)\b", self.txt)
-        commitIDs = list(map(lambda d: d[2:], commitIDs))
-        commitIDs = OrderedDict.fromkeys(commitIDs, True)
-
-        if commitIDs is None or len(commitIDs) == 0 or list(commitIDs)[0] == "":
-            #print("Fix commit regex for", self.txt)
-            return []
-
-        results = self.conduitAPI.queryCommitsByID(commitIDs)
-        if results is None:
-            return []
-        results = results.get("data")
-
-        strings = []
-        for commitID in commitIDs:
-            for commitPHID in results:
-
-                result = results[commitPHID]
-                if result["id"] == commitID:
-
-                    replyStringConstructor = PhabricatorReplyStringConstructor(
-                        objID="rP" + result["id"],
-                        objLink=result["uri"],
-                        objTitle=result["summary"],
-                        formatting=self.formatting,
-                    )
-
-                    strings.append(replyStringConstructor.constructRevisionReplyString(
-                        authorName=result["authorName"],
-                    ))
-
-        return strings
 
     # Display the title and URL of all differential IDs appearing in the text (D123)
     def __pasteReplies(self):
@@ -365,7 +328,7 @@ class PhabricatorStoryPrinter:
             if authorPHID == "PHID-APPS-PhabricatorDiffusionApplication":
                 if self.verbose:
                     print("Fallback: Commit without phabricator account: [" + text + "]")
-                authorName = self.conduitAPI.queryCommitsByID(objID[len("rP"):])
+                authorName = self.conduitAPI.queryCommitsByPHIDs(objectPHID)
                 if authorName is None:
                     return []
                 authorName = authorName.get("data")[objectPHID]["author"]
@@ -609,9 +572,9 @@ class ConduitAPI:
         })
 
     # Returns object PHID, authorName, uri, summary, epoch
-    def queryCommitsByID(self, IDs):
+    def queryCommitsByPHIDs(self, PHIDs):
         return self.queryAPI("/api/diffusion.querycommits", {
-            "ids[]": IDs
+            "phids[]": PHIDs
         })
 
     # Returns object PHID, authorName, uri, summary, epoch
@@ -708,12 +671,6 @@ class PhabricatorReplyStringConstructor:
 
     def constructDifferentialReplyString(self, statusName):
         return self.formatting.bold(self.objID) + ": " + self.objTitle + " [" + statusName + "] – " + \
-            self.formatting.formatLink(self.objLink)
-
-    def constructRevisionReplyString(self, authorName):
-        return self.formatting.bold(self.objID) + " " + \
-            self.formatting.bold("Author:") + " " + self.formatting.obscureAuthorName(authorName) + ". " + \
-            self.formatting.bold("Commit message:") + " " + self.objTitle + " " + \
             self.formatting.formatLink(self.objLink)
 
     def constructPasteReplyString(self, authorName):
