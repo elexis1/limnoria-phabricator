@@ -158,7 +158,6 @@ class PhabricatorReplyPrinter:
 
         return strings
 
-
     # Display the title and URL of all differential IDs appearing in the text (D123)
     def __pasteReplies(self):
 
@@ -658,8 +657,8 @@ class PhabricatorStringFormatting:
 
     def formatLink(self, url):
         if not self.htmlLinks:
-            return "<" + url + ">"
-        return "<a href=\"" + url + "\">" + html.escape("<" + url + ">") + "</a>"
+            return url
+        return "<a href=\"" + url + "\">" + html.escape(url) + "</a>"
 
 class PhabricatorReplyStringConstructor:
 
